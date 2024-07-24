@@ -72,7 +72,9 @@ class MLP(Module):
         self.to_time_emb = nn.Sequential(
             LearnedSinusoidalPosEmb(dim_cond),
             nn.Linear(dim_cond + 1, dim_cond),
-            nn.SiLU()
+            nn.SiLU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim_cond, dim_cond)
         )
 
         for _ in range(depth):
@@ -111,7 +113,7 @@ class MLP(Module):
         for adaln, bloc in self.layers:
             residual = denoised
             denoised = adaln(denoised, condition = cond)
-            denoised = block(denoised) + denoised
+            denoised = block(denoised) + residual
 
         return denoised
 
