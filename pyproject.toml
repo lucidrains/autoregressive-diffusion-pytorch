@@ -1,0 +1,47 @@
+[project]
+name = "autoregressive-diffusion-pytorch"
+version = "0.0.1"
+description = "Autoregressive Diffusion - Pytorch"
+authors = [
+    { name = "Phil Wang", email = "lucidrains@gmail.com" }
+]
+readme = "README.md"
+requires-python = ">= 3.8"
+license = { file = "LICENSE" }
+keywords = [
+    'artificial intelligence',
+    'deep learning',
+    'transformers',
+    'denoising diffusion',
+  ]
+classifiers=[
+    'Development Status :: 4 - Beta',
+    'Intended Audience :: Developers',
+    'Topic :: Scientific/Engineering :: Artificial Intelligence',
+    'License :: OSI Approved :: MIT License',
+    'Programming Language :: Python :: 3.8',
+  ]
+
+dependencies = [
+    'einx>=0.3.0',
+    'einops>=0.8.0',
+    'x-transformers>=1.31.14',
+    'torch>=2.0',
+]
+
+[project.urls]
+Homepage = "https://pypi.org/project/autoregressive-diffusion-pytorch/"
+Repository = "https://github.com/lucidrains/autoregressive-diffusion-pytorch"
+
+[project.optional-dependencies]
+examples = ["tqdm", "numpy"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["autoregressive-diffusion-pytorch"]
