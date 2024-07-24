@@ -1,8 +1,9 @@
 import torch
-from torch import nn
+from torch import nn, pi
 import torch.nn.functional as F
 from torch.nn import Module, ModuleList
 
+from einops import rearrange
 from einops.layers.torch import Rearrange
 
 from x_transformers import (
@@ -50,7 +51,7 @@ class LearnedSinusoidalPosEmb(Module):
 
     def forward(self, x):
         x = rearrange(x, 'b -> b 1')
-        freqs = x * rearrange(self.weights, 'd -> 1 d') * 2 * math.pi
+        freqs = x * rearrange(self.weights, 'd -> 1 d') * 2 * pi
         fouriered = torch.cat((freqs.sin(), freqs.cos()), dim = -1)
         fouriered = torch.cat((x, fouriered), dim = -1)
         return fouriered
@@ -110,7 +111,7 @@ class MLP(Module):
 
         denoised = noised
 
-        for adaln, bloc in self.layers:
+        for adaln, block in self.layers:
             residual = denoised
             denoised = adaln(denoised, condition = cond)
             denoised = block(denoised) + residual
@@ -159,12 +160,14 @@ class ContinuousDecoderWithMLPDenoiser(Module):
 
     def forward(
         self,
-        x,
+        noised,
+        seq,
         *,
         times,
     ):
-        x = self.transformer(x)
-        return x
+        cond = self.transformer(seq)
+        denoised = self.denoiser(noised, times = times, cond = cond)
+        return denoised
 
 # main class
 
