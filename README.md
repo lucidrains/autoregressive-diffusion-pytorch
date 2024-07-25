@@ -34,6 +34,33 @@ assert sampled.shape == seq.shape
 
 ```
 
+For images treated as a sequence of tokens (as in paper)
+
+```python
+import torch
+from autoregressive_diffusion_pytorch import (
+    ImageAutoregressiveDiffusion
+)
+
+model = ImageAutoregressiveDiffusion(
+    model = dict(
+        dim = 512
+    ),
+    image_size = 64,
+    patch_size = 8
+)
+
+images = torch.randn(3, 3, 64, 64)
+
+loss = model(images)
+loss.backward()
+
+sampled = model.sample(batch_size = 3)
+
+assert sampled.shape == images.shape
+
+```
+
 ## Citations
 
 ```bibtex

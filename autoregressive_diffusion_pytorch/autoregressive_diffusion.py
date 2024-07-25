@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Literal
 from functools import partial
 
@@ -445,10 +446,13 @@ class AutoregressiveDiffusion(Module):
     def device(self):
         return next(self.transformer.parameters()).device
 
+    @torch.no_grad()
     def sample(
         self,
         batch_size = 1
     ):
+        self.eval()
+
         start_tokens = repeat(self.start_token, 'd -> b 1 d', b = batch_size)
 
         out = torch.empty((batch_size, 0, self.dim_input), device = self.device, dtype = torch.float32)
@@ -509,19 +513,32 @@ class ImageAutoregressiveDiffusion(Module):
         *,
         image_size,
         patch_size,
+        channels = 3,
         model: dict = dict(),
     ):
+        super().__init__()
         assert divisible_by(image_size, patch_size)
 
-        dim = image_size / patch_size
-        self.to_tokens = Rearrange(
+        num_patches = (image_size // patch_size) ** 2
+        dim_in = channels * patch_size ** 2
 
-        )
+        self.image_size = image_size
+        self.patch_size = patch_size
+
+        self.to_tokens = Rearrange('b c (h p1) (w p2) -> b (h w) (c p1 p2)', p1 = patch_size, p2 = patch_size)
 
         self.model = AutoregressiveDiffusion(
-            **model
+            **model,
+            dim_input = dim_in,
+            max_seq_len = num_patches
         )
 
-    def forward(self, images):
-        return images
+        self.to_image = Rearrange('b (h w) (c p1 p2) -> b c (h p1) (w p2)', p1 = patch_size, p2 = patch_size, h = int(math.sqrt(num_patches)))
 
+    def sample(self, batch_size = 1):
+        tokens = self.model.sample(batch_size = batch_size)
+        return self.to_image(tokens)
+
+    def forward(self, images):
+        tokens = self.to_tokens(images)
+        return self.model(tokens)
