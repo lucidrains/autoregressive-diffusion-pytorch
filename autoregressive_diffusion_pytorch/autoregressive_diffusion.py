@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Literal
 from functools import partial
 
@@ -171,10 +173,11 @@ def gamma_to_log_snr(gamma, scale = 1, eps = 1e-5):
 class GaussianDiffusion(Module):
     def __init__(
         self,
+        dim: int,
         model: MLP,
         *,
         timesteps = 1000,
-        sampling_timesteps = None,
+        sampling_timesteps: int | None = None,
         use_ddim = True,
         noise_schedule: Literal['linear', 'cosine'] = 'cosine',
         objective: Literal['eps', 'v'] = 'v',
@@ -185,6 +188,7 @@ class GaussianDiffusion(Module):
     ):
         super().__init__()
         self.model = model
+        self.dim = dim
         self.objective = objective
 
         if noise_schedule == 'linear':
@@ -227,7 +231,7 @@ class GaussianDiffusion(Module):
 
         time_pairs = self.get_sampling_timesteps(batch, device = device)
 
-        seq = torch.randn(cond.shape, device = device)
+        seq = torch.randn((batch, self.dim), device = device)
 
         for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step', total = self.timesteps, leave = False):
 
@@ -289,7 +293,7 @@ class GaussianDiffusion(Module):
 
         time_pairs = self.get_sampling_timesteps(batch, device = device)
 
-        seq = torch.randn(cond.shape, device = device)
+        seq = torch.randn((batch, self.dim), device = device)
 
         for times, times_next in tqdm(time_pairs, desc = 'sampling loop time step', leave = False):
 
@@ -395,6 +399,7 @@ class AutoregressiveDiffusion(Module):
         heads = 8,
         mlp_depth = 3,
         mlp_width = 1024,
+        dim_input = None,
         decoder_kwargs: dict = dict(),
         mlp_kwargs: dict = dict(),
         diffusion_kwargs: dict = dict(
@@ -410,6 +415,10 @@ class AutoregressiveDiffusion(Module):
         self.max_seq_len = max_seq_len
         self.abs_pos_emb = nn.Embedding(max_seq_len, dim)
 
+        dim_input = default(dim_input, dim)
+        self.dim_input = dim_input
+        self.proj_in = nn.Linear(dim_input, dim) if dim_input != dim else nn.Identity()
+
         self.transformer = Decoder(
             dim = dim,
             depth = depth,
@@ -419,7 +428,7 @@ class AutoregressiveDiffusion(Module):
         )
 
         self.denoiser = MLP(
-            dim = dim,
+            dim = dim_input,
             dim_cond = dim,
             depth = mlp_depth,
             width = mlp_width,
@@ -427,19 +436,31 @@ class AutoregressiveDiffusion(Module):
         )
 
         self.diffusion = GaussianDiffusion(
+            dim_input,
             self.denoiser,
             **diffusion_kwargs
         )
+
+    @property
+    def device(self):
+        return next(self.transformer.parameters()).device
 
     def sample(
         self,
         batch_size = 1
     ):
-        out = repeat(self.start_token, 'd -> b 1 d', b = batch_size)
+        start_tokens = repeat(self.start_token, 'd -> b 1 d', b = batch_size)
+
+        out = torch.empty((batch_size, 0, self.dim_input), device = self.device, dtype = torch.float32)
 
         for _ in tqdm(range(self.max_seq_len), desc = 'tokens'):
 
-            cond = self.transformer(out)
+            cond = self.proj_in(out)
+            cond = cond + self.abs_pos_emb(torch.arange(cond.shape[1], device = self.device))
+
+            cond = torch.cat((start_tokens, cond), dim = 1)
+            cond = self.transformer(cond)
+
             last_cond = cond[:, -1]
 
             denoised_pred = self.diffusion.sample(cond = last_cond)
@@ -447,7 +468,7 @@ class AutoregressiveDiffusion(Module):
             denoised_pred = rearrange(denoised_pred, 'b d -> b 1 d')
             out = torch.cat((out, denoised_pred), dim = 1)
 
-        return out[:, 1:]
+        return out
 
     def forward(
         self,
@@ -457,14 +478,17 @@ class AutoregressiveDiffusion(Module):
 
         assert seq_len == self.max_seq_len
 
+        # break into seq and the continuous targets to be predicted
+
+        seq, target = seq[:, :-1], seq
+
         # append start tokens
 
+        seq = self.proj_in(seq)
         start_token = repeat(self.start_token, 'd -> b 1 d', b = b)
         seq = torch.cat((start_token, seq), dim = 1)
 
-        # break into seq and the continuous targets to be predicted
-
-        seq, target = seq[:, :-1], seq[:, 1:]
+        seq = seq + self.abs_pos_emb(torch.arange(seq_len, device = self.device))
 
         cond = self.transformer(seq)
 
@@ -476,3 +500,28 @@ class AutoregressiveDiffusion(Module):
         diffusion_loss = self.diffusion(target, cond = cond)
 
         return diffusion_loss
+
+# image wrapper
+
+class ImageAutoregressiveDiffusion(Module):
+    def __init__(
+        self,
+        *,
+        image_size,
+        patch_size,
+        model: dict = dict(),
+    ):
+        assert divisible_by(image_size, patch_size)
+
+        dim = image_size / patch_size
+        self.to_tokens = Rearrange(
+
+        )
+
+        self.model = AutoregressiveDiffusion(
+            **model
+        )
+
+    def forward(self, images):
+        return images
+
