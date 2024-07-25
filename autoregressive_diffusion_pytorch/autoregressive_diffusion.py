@@ -511,6 +511,12 @@ class AutoregressiveDiffusion(Module):
 
 # image wrapper
 
+def normalize_to_neg_one_to_one(img):
+    return img * 2 - 1
+
+def unnormalize_to_zero_to_one(t):
+    return (t + 1) * 0.5
+
 class ImageAutoregressiveDiffusion(Module):
     def __init__(
         self,
@@ -541,8 +547,10 @@ class ImageAutoregressiveDiffusion(Module):
 
     def sample(self, batch_size = 1):
         tokens = self.model.sample(batch_size = batch_size)
-        return self.to_image(tokens)
+        images = self.to_image(tokens)
+        return unnormalize_to_zero_to_one(images)
 
     def forward(self, images):
+        images = normalize_to_neg_one_to_one(images)
         tokens = self.to_tokens(images)
         return self.model(tokens)
