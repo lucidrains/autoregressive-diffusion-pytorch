@@ -220,9 +220,8 @@ class GaussianDiffusion(Module):
 
     def get_sampling_timesteps(self, batch, *, device):
         times = torch.linspace(1., 0., self.sampling_timesteps + 1, device = device)
-        times = repeat(times, 't -> b t', b = batch)
-        times = torch.stack((times[:, :-1], times[:, 1:]), dim = 0)
-        times = times.unbind(dim = -1)
+        times = repeat(times, 't -> t b', b = batch)
+        times = torch.stack((times[:-1], times[1:]), dim = 1)
         return times
 
     @torch.no_grad()
