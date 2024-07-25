@@ -464,9 +464,10 @@ class AutoregressiveDiffusion(Module):
         for _ in tqdm(range(self.max_seq_len - out.shape[1]), desc = 'tokens'):
 
             cond = self.proj_in(out)
-            cond = cond + self.abs_pos_emb(torch.arange(cond.shape[1], device = self.device))
 
             cond = torch.cat((start_tokens, cond), dim = 1)
+            cond = cond + self.abs_pos_emb(torch.arange(cond.shape[1], device = self.device))
+
             cond = self.transformer(cond)
 
             last_cond = cond[:, -1]
@@ -494,8 +495,8 @@ class AutoregressiveDiffusion(Module):
 
         seq = self.proj_in(seq)
         start_token = repeat(self.start_token, 'd -> b 1 d', b = b)
-        seq = torch.cat((start_token, seq), dim = 1)
 
+        seq = torch.cat((start_token, seq), dim = 1)
         seq = seq + self.abs_pos_emb(torch.arange(seq_len, device = self.device))
 
         cond = self.transformer(seq)
