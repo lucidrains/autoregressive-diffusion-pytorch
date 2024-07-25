@@ -6,6 +6,23 @@ Implementation of the architecture behind <a href="https://arxiv.org/abs/2406.11
 
 You can discuss the paper temporarily [here](https://discord.com/invite/9myQVTbN)
 
+## Usage
+
+```python
+import torch
+from autoregressive_diffusion_pytorch import AutoregressiveDiffusion
+
+model = AutoregressiveDiffusion(
+    dim = 512,
+    max_seq_len = 1024
+)
+
+seq = torch.randn(3, 1024, 512)
+
+loss = model(seq)
+loss.backward()
+```
+
 ## Citations
 
 ```bibtex
