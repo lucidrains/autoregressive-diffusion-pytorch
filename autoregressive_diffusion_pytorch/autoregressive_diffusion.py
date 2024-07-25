@@ -449,15 +449,19 @@ class AutoregressiveDiffusion(Module):
     @torch.no_grad()
     def sample(
         self,
-        batch_size = 1
+        batch_size = 1,
+        prompt  = None
     ):
         self.eval()
 
         start_tokens = repeat(self.start_token, 'd -> b 1 d', b = batch_size)
 
-        out = torch.empty((batch_size, 0, self.dim_input), device = self.device, dtype = torch.float32)
+        if not exists(prompt):
+            out = torch.empty((batch_size, 0, self.dim_input), device = self.device, dtype = torch.float32)
+        else:
+            out = prompt
 
-        for _ in tqdm(range(self.max_seq_len), desc = 'tokens'):
+        for _ in tqdm(range(self.max_seq_len - out.shape[1]), desc = 'tokens'):
 
             cond = self.proj_in(out)
             cond = cond + self.abs_pos_emb(torch.arange(cond.shape[1], device = self.device))
