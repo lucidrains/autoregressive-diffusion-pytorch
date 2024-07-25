@@ -1,6 +1,6 @@
 <img src="./ar-diffusion.png" width="400px"></img>
 
-## Autoregressive Diffusion - Pytorch (wip)
+## Autoregressive Diffusion - Pytorch
 
 Implementation of the architecture behind <a href="https://arxiv.org/abs/2406.11838">Autoregressive Image Generation without Vector Quantization</a> in Pytorch
 
