@@ -182,6 +182,7 @@ class GaussianDiffusion(Module):
         noise_schedule: Literal['linear', 'cosine'] = 'cosine',
         objective: Literal['eps', 'v'] = 'v',
         schedule_kwargs: dict = dict(),
+        clip_during_sampling = True,
         min_snr_loss_weight = True,
         min_snr_gamma = 5,
     ):
@@ -201,9 +202,12 @@ class GaussianDiffusion(Module):
         self.gamma_schedule = partial(self.gamma_schedule, **schedule_kwargs)
 
         self.timesteps = timesteps
-        self.sampling_timesteps = default(sampling_timesteps, timesteps)
 
+        # sampling related
+
+        self.sampling_timesteps = default(sampling_timesteps, timesteps)
         self.use_ddim = use_ddim
+        self.clip_during_sampling = clip_during_sampling
 
         # min snr loss weight
 
@@ -257,7 +261,8 @@ class GaussianDiffusion(Module):
 
             # clip x0
 
-            x_start.clamp_(-1., 1.)
+            if self.clip_during_sampling:
+                x_start.clamp_(-1., 1.)
 
             # derive posterior mean and variance
 
@@ -316,7 +321,8 @@ class GaussianDiffusion(Module):
 
             # clip x0
 
-            x_start.clamp_(-1., 1.)
+            if self.clip_during_sampling:
+                x_start.clamp_(-1., 1.)
 
             # get predicted noise
 
@@ -398,7 +404,8 @@ class AutoregressiveDiffusion(Module):
         diffusion_kwargs: dict = dict(
             timesteps = 1000,
             sampling_timesteps = 100,
-            use_ddim = False
+            use_ddim = False,
+            clip_during_sampling = True
         )
     ):
         super().__init__()
