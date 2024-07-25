@@ -280,7 +280,6 @@ class GaussianDiffusion(Module):
 
             seq = mean + (0.5 * log_variance).exp() * noise
 
-        print(seq.shape)
         return seq
 
     @torch.no_grad()
@@ -451,7 +450,9 @@ class AutoregressiveDiffusion(Module):
         self,
         seq
     ):
-        b = seq.shape[0]
+        b, seq_len = seq.shape[:2]
+
+        assert seq_len == self.max_seq_len
 
         # append start tokens
 
