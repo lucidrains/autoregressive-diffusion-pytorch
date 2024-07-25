@@ -13,10 +13,7 @@ from einops.layers.torch import Rearrange
 
 from tqdm import tqdm
 
-from x_transformers import (
-    ContinuousTransformerWrapper,
-    Decoder
-)
+from x_transformers import Decoder
 
 # helpers
 
