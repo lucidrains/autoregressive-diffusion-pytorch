@@ -38,13 +38,13 @@ For images treated as a sequence of tokens (as in paper)
 
 ```python
 import torch
-from autoregressive_diffusion_pytorch import (
-    ImageAutoregressiveDiffusion
-)
+from autoregressive_diffusion_pytorch import ImageAutoregressiveDiffusion
 
 model = ImageAutoregressiveDiffusion(
     model = dict(
-        dim = 512
+        dim = 1024,
+        depth = 12,
+        heads = 12,
     ),
     image_size = 64,
     patch_size = 8
