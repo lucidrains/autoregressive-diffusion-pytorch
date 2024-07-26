@@ -123,9 +123,13 @@ class MLP(Module):
                 nn.Linear(dim, dim)
             )
 
+            block_out_gamma = nn.Linear(dim_cond, dim, bias = False)
+            nn.init.zeros_(block_out_gamma.weight)
+
             layers.append(ModuleList([
                 adaptive_layernorm,
-                block
+                block,
+                block_out_gamma
             ]))
 
         self.layers = layers
@@ -144,10 +148,12 @@ class MLP(Module):
 
         denoised = noised
 
-        for adaln, block in self.layers:
+        for adaln, block, block_out_gamma in self.layers:
             residual = denoised
             denoised = adaln(denoised, condition = cond)
-            denoised = block(denoised) + residual
+
+            block_out = block(denoised) * (block_out_gamma(cond) + 1.)
+            denoised = block_out + residual
 
         return denoised
 
@@ -179,7 +185,7 @@ class GaussianDiffusion(Module):
         *,
         timesteps = 1000,
         sampling_timesteps: int | None = None,
-        use_ddim = True,
+        use_ddim = False,
         noise_schedule: Literal['linear', 'cosine'] = 'cosine',
         objective: Literal['eps', 'v'] = 'v',
         schedule_kwargs: dict = dict(),
@@ -483,8 +489,9 @@ class AutoregressiveDiffusion(Module):
         self,
         seq
     ):
-        b, seq_len = seq.shape[:2]
+        b, seq_len, dim = seq.shape
 
+        assert dim == self.dim_input
         assert seq_len == self.max_seq_len
 
         # break into seq and the continuous targets to be predicted
