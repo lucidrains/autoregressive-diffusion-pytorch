@@ -78,3 +78,14 @@ assert sampled.shape == images.shape
     url     = {https://api.semanticscholar.org/CorpusID:270560593}
 }
 ```
+
+```bibtex
+@article{Wu2023ARDiffusionAD,
+    title     = {AR-Diffusion: Auto-Regressive Diffusion Model for Text Generation},
+    author    = {Tong Wu and Zhihao Fan and Xiao Liu and Yeyun Gong and Yelong Shen and Jian Jiao and Haitao Zheng and Juntao Li and Zhongyu Wei and Jian Guo and Nan Duan and Weizhu Chen},
+    journal   = {ArXiv},
+    year      = {2023},
+    volume    = {abs/2305.09515},
+    url       = {https://api.semanticscholar.org/CorpusID:258714669}
+}
+```
