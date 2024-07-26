@@ -21,8 +21,11 @@ import torch
 from autoregressive_diffusion_pytorch import AutoregressiveDiffusion
 
 model = AutoregressiveDiffusion(
-    dim = 512,
-    max_seq_len = 32
+    dim = 1024,
+    max_seq_len = 32,
+    depth = 8,
+    mlp_depth = 3,
+    mlp_width = 1024
 )
 
 seq = torch.randn(3, 32, 512)
