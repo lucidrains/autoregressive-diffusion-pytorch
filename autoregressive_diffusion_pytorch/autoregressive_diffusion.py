@@ -103,8 +103,6 @@ class MLP(Module):
         super().__init__()
         layers = ModuleList([])
 
-        self.proj_in = nn.Linear(dim_input, dim)
-
         self.to_time_emb = nn.Sequential(
             LearnedSinusoidalPosEmb(dim_cond),
             nn.Linear(dim_cond + 1, dim_cond),
@@ -113,18 +111,18 @@ class MLP(Module):
         for _ in range(depth):
 
             adaptive_layernorm = AdaptiveLayerNorm(
-                dim,
+                dim_input,
                 dim_condition = dim_cond
             )
 
             block = nn.Sequential(
-                nn.Linear(dim, dim),
+                nn.Linear(dim_input, dim),
                 nn.SiLU(),
                 nn.Dropout(dropout),
-                nn.Linear(dim, dim)
+                nn.Linear(dim, dim_input)
             )
 
-            block_out_gamma = nn.Linear(dim_cond, dim, bias = False)
+            block_out_gamma = nn.Linear(dim_cond, dim_input, bias = False)
             nn.init.zeros_(block_out_gamma.weight)
 
             layers.append(ModuleList([
@@ -134,11 +132,6 @@ class MLP(Module):
             ]))
 
         self.layers = layers
-
-        self.proj_out = nn.Sequential(
-            nn.LayerNorm(dim),
-            nn.Linear(dim, dim_input)
-        )
 
     def forward(
         self,
@@ -152,7 +145,7 @@ class MLP(Module):
         time_emb = self.to_time_emb(times)
         cond = F.silu(time_emb + cond)
 
-        denoised = self.proj_in(noised)
+        denoised = noised
 
         for adaln, block, block_out_gamma in self.layers:
             residual = denoised
@@ -161,7 +154,7 @@ class MLP(Module):
             block_out = block(denoised) * (block_out_gamma(cond) + 1.)
             denoised = block_out + residual
 
-        return self.proj_out(denoised)
+        return denoised
 
 # gaussian diffusion
 
@@ -474,6 +467,8 @@ class AutoregressiveDiffusion(Module):
         else:
             out = prompt
 
+        cache = None
+
         for _ in tqdm(range(self.max_seq_len - out.shape[1]), desc = 'tokens'):
 
             cond = self.proj_in(out)
@@ -481,7 +476,7 @@ class AutoregressiveDiffusion(Module):
             cond = torch.cat((start_tokens, cond), dim = 1)
             cond = cond + self.abs_pos_emb(torch.arange(cond.shape[1], device = self.device))
 
-            cond = self.transformer(cond)
+            cond, cache = self.transformer(cond, cache = cache, return_hiddens = True)
 
             last_cond = cond[:, -1]
 
