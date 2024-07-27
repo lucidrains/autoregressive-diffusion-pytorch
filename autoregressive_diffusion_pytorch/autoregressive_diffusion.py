@@ -95,6 +95,7 @@ class MLP(Module):
         self,
         dim,
         dim_cond,
+        dim_input,
         depth = 3,
         width = 1024,
         dropout = 0.
@@ -102,12 +103,11 @@ class MLP(Module):
         super().__init__()
         layers = ModuleList([])
 
+        self.proj_in = nn.Linear(dim_input, dim)
+
         self.to_time_emb = nn.Sequential(
             LearnedSinusoidalPosEmb(dim_cond),
             nn.Linear(dim_cond + 1, dim_cond),
-            nn.SiLU(),
-            nn.Dropout(dropout),
-            nn.Linear(dim_cond, dim_cond)
         )
 
         for _ in range(depth):
@@ -120,6 +120,7 @@ class MLP(Module):
             block = nn.Sequential(
                 nn.Linear(dim, dim),
                 nn.SiLU(),
+                nn.Dropout(dropout),
                 nn.Linear(dim, dim)
             )
 
@@ -134,6 +135,11 @@ class MLP(Module):
 
         self.layers = layers
 
+        self.proj_out = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, dim_input)
+        )
+
     def forward(
         self,
         noised,
@@ -144,9 +150,9 @@ class MLP(Module):
         assert noised.ndim == 2
 
         time_emb = self.to_time_emb(times)
-        cond = time_emb + cond
+        cond = F.silu(time_emb + cond)
 
-        denoised = noised
+        denoised = self.proj_in(noised)
 
         for adaln, block, block_out_gamma in self.layers:
             residual = denoised
@@ -155,7 +161,7 @@ class MLP(Module):
             block_out = block(denoised) * (block_out_gamma(cond) + 1.)
             denoised = block_out + residual
 
-        return denoised
+        return self.proj_out(denoised)
 
 # gaussian diffusion
 
@@ -424,7 +430,7 @@ class AutoregressiveDiffusion(Module):
 
         dim_input = default(dim_input, dim)
         self.dim_input = dim_input
-        self.proj_in = nn.Linear(dim_input, dim) if dim_input != dim else nn.Identity()
+        self.proj_in = nn.Linear(dim_input, dim)
 
         self.transformer = Decoder(
             dim = dim,
@@ -435,8 +441,9 @@ class AutoregressiveDiffusion(Module):
         )
 
         self.denoiser = MLP(
-            dim = dim_input,
+            dim = dim,
             dim_cond = dim,
+            dim_input = dim_input,
             depth = mlp_depth,
             width = mlp_width,
             **mlp_kwargs
