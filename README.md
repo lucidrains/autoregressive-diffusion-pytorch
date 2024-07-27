@@ -21,6 +21,7 @@ import torch
 from autoregressive_diffusion_pytorch import AutoregressiveDiffusion
 
 model = AutoregressiveDiffusion(
+    dim_input = 512,
     dim = 1024,
     max_seq_len = 32,
     depth = 8,
