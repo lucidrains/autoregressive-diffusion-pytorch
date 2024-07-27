@@ -93,7 +93,6 @@ class LearnedSinusoidalPosEmb(Module):
 class MLP(Module):
     def __init__(
         self,
-        dim,
         dim_cond,
         dim_input,
         depth = 3,
@@ -116,10 +115,10 @@ class MLP(Module):
             )
 
             block = nn.Sequential(
-                nn.Linear(dim_input, dim),
+                nn.Linear(dim_input, width),
                 nn.SiLU(),
                 nn.Dropout(dropout),
-                nn.Linear(dim, dim_input)
+                nn.Linear(width, dim_input)
             )
 
             block_out_gamma = nn.Linear(dim_cond, dim_input, bias = False)
@@ -404,7 +403,7 @@ class AutoregressiveDiffusion(Module):
         dim_head = 64,
         heads = 8,
         mlp_depth = 3,
-        mlp_width = 1024,
+        mlp_width = None,
         dim_input = None,
         decoder_kwargs: dict = dict(),
         mlp_kwargs: dict = dict(),
@@ -434,11 +433,10 @@ class AutoregressiveDiffusion(Module):
         )
 
         self.denoiser = MLP(
-            dim = dim,
             dim_cond = dim,
             dim_input = dim_input,
             depth = mlp_depth,
-            width = mlp_width,
+            width = default(mlp_width, dim),
             **mlp_kwargs
         )
 
