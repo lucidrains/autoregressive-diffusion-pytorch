@@ -4,6 +4,8 @@
 
 Implementation of the architecture behind <a href="https://arxiv.org/abs/2406.11838">Autoregressive Image Generation without Vector Quantization</a> in Pytorch
 
+Official repository has been released <a href="https://github.com/LTH14/mar">here</a>
+
 <img src="./images/sample.flowers.59000.png" width="400px"></img>
 
 *oxford flowers at 59k steps*
