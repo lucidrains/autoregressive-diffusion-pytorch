@@ -92,3 +92,14 @@ assert sampled.shape == images.shape
     url       = {https://api.semanticscholar.org/CorpusID:258714669}
 }
 ```
+
+```bibtex
+@article{Karras2022ElucidatingTD,
+    title   = {Elucidating the Design Space of Diffusion-Based Generative Models},
+    author  = {Tero Karras and Miika Aittala and Timo Aila and Samuli Laine},
+    journal = {ArXiv},
+    year    = {2022},
+    volume  = {abs/2206.00364},
+    url     = {https://api.semanticscholar.org/CorpusID:249240415}
+}
+```
