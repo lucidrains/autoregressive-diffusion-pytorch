@@ -231,7 +231,7 @@ class ElucidatedDiffusion(Module):
         if isinstance(sigma, float):
             sigma = torch.full((batch,), sigma, device = device)
 
-        padded_sigma = rearrange(sigma, 'b -> b 1')
+        padded_sigma = right_pad_dims_to(noised_seq, sigma)
 
         net_out = self.net(
             self.c_in(padded_sigma) * noised_seq,
@@ -331,7 +331,7 @@ class ElucidatedDiffusion(Module):
         assert dim == self.dim, f'dimension of sequence being passed in must be {self.dim} but received {dim}'
 
         sigmas = self.noise_distribution(batch_size)
-        padded_sigmas = rearrange(sigmas, 'b -> b 1')
+        padded_sigmas = right_pad_dims_to(seq, sigmas)
 
         noise = torch.randn_like(seq)
 
