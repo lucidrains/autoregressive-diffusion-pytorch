@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from math import sqrt
 from typing import Literal
 from functools import partial
 
@@ -157,239 +158,193 @@ class MLP(Module):
 
 # gaussian diffusion
 
-def simple_linear_schedule(t, clip_min = 1e-9):
-    return (1. - t).clamp(min = clip_min)
-
-def cosine_schedule(t, start = 0, end = 1, tau = 1, clip_min = 1e-9):
-    start, end, tau = map(torch.tensor, (start, end, tau))
-    power = 2 * tau
-    v_start = torch.cos(start * pi / 2) ** power
-    v_end = torch.cos(end * pi / 2) ** power
-    output = torch.cos((t * (end - start) + start) * pi / 2) ** power
-    output = (v_end - output) / (v_end - v_start)
-    return output.clamp(min = clip_min)
-
-def gamma_to_alpha_sigma(gamma, scale = 1):
-    return torch.sqrt(gamma) * scale, torch.sqrt(1 - gamma)
-
-def gamma_to_log_snr(gamma, scale = 1, eps = 1e-5):
-    return log(gamma * (scale ** 2) / (1. - gamma), eps = eps)
-
-class GaussianDiffusion(Module):
+class ElucidatedDiffusion(Module):
     def __init__(
         self,
         dim: int,
-        model: MLP,
+        net: MLP,
         *,
-        timesteps = 1000,
-        sampling_timesteps: int | None = None,
-        use_ddim = False,
-        noise_schedule: Literal['linear', 'cosine'] = 'cosine',
-        objective: Literal['eps', 'v'] = 'v',
-        schedule_kwargs: dict = dict(),
-        clip_during_sampling = True,
-        min_snr_loss_weight = True,
-        min_snr_gamma = 5,
+        num_sample_steps = 32, # number of sampling steps
+        sigma_min = 0.002,     # min noise level
+        sigma_max = 80,        # max noise level
+        sigma_data = 0.5,      # standard deviation of data distribution
+        rho = 7,               # controls the sampling schedule
+        P_mean = -1.2,         # mean of log-normal distribution from which noise is drawn for training
+        P_std = 1.2,           # standard deviation of log-normal distribution from which noise is drawn for training
+        S_churn = 80,          # parameters for stochastic sampling - depends on dataset, Table 5 in apper
+        S_tmin = 0.05,
+        S_tmax = 50,
+        S_noise = 1.003,
+        clamp_during_sampling = True
     ):
         super().__init__()
-        self.model = model
+
+        self.net = net
         self.dim = dim
-        self.objective = objective
 
-        if noise_schedule == 'linear':
-            self.gamma_schedule = simple_linear_schedule
-        elif noise_schedule == 'cosine':
-            self.gamma_schedule = cosine_schedule
-        else:
-            raise ValueError(f'invalid noise schedule {noise_schedule}')
+        # parameters
 
-        # gamma schedules
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
+        self.sigma_data = sigma_data
 
-        self.gamma_schedule = partial(self.gamma_schedule, **schedule_kwargs)
+        self.rho = rho
 
-        self.timesteps = timesteps
+        self.P_mean = P_mean
+        self.P_std = P_std
 
-        # sampling related
+        self.num_sample_steps = num_sample_steps  # otherwise known as N in the paper
 
-        self.sampling_timesteps = default(sampling_timesteps, timesteps)
-        self.use_ddim = use_ddim
-        self.clip_during_sampling = clip_during_sampling
+        self.S_churn = S_churn
+        self.S_tmin = S_tmin
+        self.S_tmax = S_tmax
+        self.S_noise = S_noise
 
-        # min snr loss weight
-
-        self.min_snr_loss_weight = min_snr_loss_weight
-        self.min_snr_gamma = min_snr_gamma
+        self.clamp_during_sampling = clamp_during_sampling
 
     @property
     def device(self):
-        return next(self.model.parameters()).device
+        return next(self.net.parameters()).device
 
-    def get_sampling_timesteps(self, batch, *, device):
-        times = torch.linspace(1., 0., self.sampling_timesteps + 1, device = device)
-        times = repeat(times, 't -> t b', b = batch)
-        times = torch.stack((times[:-1], times[1:]), dim = 1)
-        return times
+    # derived preconditioning params - Table 1
+
+    def c_skip(self, sigma):
+        return (self.sigma_data ** 2) / (sigma ** 2 + self.sigma_data ** 2)
+
+    def c_out(self, sigma):
+        return sigma * self.sigma_data * (self.sigma_data ** 2 + sigma ** 2) ** -0.5
+
+    def c_in(self, sigma):
+        return 1 * (sigma ** 2 + self.sigma_data ** 2) ** -0.5
+
+    def c_noise(self, sigma):
+        return log(sigma) * 0.25
+
+    # preconditioned network output
+    # equation (7) in the paper
+
+    def preconditioned_network_forward(self, noised_seq, sigma, *, cond, clamp = None):
+        clamp = default(clamp, self.clamp_during_sampling)
+
+        batch, device = noised_seq.shape[0], noised_seq.device
+
+        if isinstance(sigma, float):
+            sigma = torch.full((batch,), sigma, device = device)
+
+        padded_sigma = rearrange(sigma, 'b -> b 1')
+
+        net_out = self.net(
+            self.c_in(padded_sigma) * noised_seq,
+            times = self.c_noise(sigma),
+            cond = cond
+        )
+
+        out = self.c_skip(padded_sigma) * noised_seq +  self.c_out(padded_sigma) * net_out
+
+        if clamp:
+            out = out.clamp(-1., 1.)
+
+        return out
+
+    # sampling
+
+    # sample schedule
+    # equation (5) in the paper
+
+    def sample_schedule(self, num_sample_steps = None):
+        num_sample_steps = default(num_sample_steps, self.num_sample_steps)
+
+        N = num_sample_steps
+        inv_rho = 1 / self.rho
+
+        steps = torch.arange(num_sample_steps, device = self.device, dtype = torch.float32)
+        sigmas = (self.sigma_max ** inv_rho + steps / (N - 1) * (self.sigma_min ** inv_rho - self.sigma_max ** inv_rho)) ** self.rho
+
+        sigmas = F.pad(sigmas, (0, 1), value = 0.) # last step is sigma value of 0.
+        return sigmas
 
     @torch.no_grad()
-    def ddpm_sample(self, cond):
-        batch, device = cond.shape[0], self.device
+    def sample(self, cond, num_sample_steps = None, clamp = None):
+        clamp = default(clamp, self.clamp_during_sampling)
+        num_sample_steps = default(num_sample_steps, self.num_sample_steps)
 
-        time_pairs = self.get_sampling_timesteps(batch, device = device)
+        shape = (cond.shape[0], self.dim)
 
-        seq = torch.randn((batch, self.dim), device = device)
+        # get the schedule, which is returned as (sigma, gamma) tuple, and pair up with the next sigma and gamma
 
-        for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step', total = self.timesteps, leave = False):
+        sigmas = self.sample_schedule(num_sample_steps)
 
-            # get predicted x0
+        gammas = torch.where(
+            (sigmas >= self.S_tmin) & (sigmas <= self.S_tmax),
+            min(self.S_churn / num_sample_steps, sqrt(2) - 1),
+            0.
+        )
 
-            model_output = self.model(seq, times = time, cond = cond)
+        sigmas_and_gammas = list(zip(sigmas[:-1], sigmas[1:], gammas[:-1]))
 
-            # get log(snr)
+        # images is noise at the beginning
 
-            gamma = self.gamma_schedule(time)
-            gamma_next = self.gamma_schedule(time_next)
+        init_sigma = sigmas[0]
 
-            gamma, gamma_next = map(partial(right_pad_dims_to, seq), (gamma, gamma_next))
+        seq = init_sigma * torch.randn(shape, device = self.device)
 
-            # get alpha sigma of time and next time
+        # gradually denoise
 
-            alpha, sigma = gamma_to_alpha_sigma(gamma)
-            alpha_next, sigma_next = gamma_to_alpha_sigma(gamma_next)
+        for sigma, sigma_next, gamma in tqdm(sigmas_and_gammas, desc = 'sampling time step'):
+            sigma, sigma_next, gamma = map(lambda t: t.item(), (sigma, sigma_next, gamma))
 
-            # calculate x0 and noise
+            eps = self.S_noise * torch.randn(shape, device = self.device) # stochastic sampling
 
-            if self.objective == 'eps':
-                x_start = safe_div(seq - sigma * model_output, alpha)
+            sigma_hat = sigma + gamma * sigma
+            seq_hat = seq + sqrt(sigma_hat ** 2 - sigma ** 2) * eps
 
-            elif self.objective == 'v':
-                x_start = alpha * seq - sigma * model_output
+            model_output = self.preconditioned_network_forward(seq_hat, sigma_hat, cond = cond, clamp = clamp)
+            denoised_over_sigma = (seq_hat - model_output) / sigma_hat
 
-            # clip x0
+            seq_next = seq_hat + (sigma_next - sigma_hat) * denoised_over_sigma
 
-            if self.clip_during_sampling:
-                x_start.clamp_(-1., 1.)
+            # second order correction, if not the last timestep
 
-            # derive posterior mean and variance
+            if sigma_next != 0:
+                model_output_next = self.preconditioned_network_forward(seq_next, sigma_next, cond = cond, clamp = clamp)
+                denoised_prime_over_sigma = (seq_next - model_output_next) / sigma_next
+                seq_next = seq_hat + 0.5 * (sigma_next - sigma_hat) * (denoised_over_sigma + denoised_prime_over_sigma)
 
-            log_snr, log_snr_next = map(gamma_to_log_snr, (gamma, gamma_next))
+            seq = seq_next
 
-            c = -expm1(log_snr - log_snr_next)
-
-            mean = alpha_next * (seq * (1 - c) / alpha + c * x_start)
-            variance = (sigma_next ** 2) * c
-            log_variance = log(variance)
-
-            # get noise
-
-            noise = einx.where(
-                'b, b d, -> b d',
-                time_next > 0,
-                torch.randn_like(seq),
-                0.
-            )
-
-            seq = mean + (0.5 * log_variance).exp() * noise
+        if clamp:
+            seq = seq.clamp(-1., 1.)
 
         return seq
 
-    @torch.no_grad()
-    def ddim_sample(self, cond):
-        batch, device = cond.shape[0], self.device
+    # training
 
-        time_pairs = self.get_sampling_timesteps(batch, device = device)
+    def loss_weight(self, sigma):
+        return (sigma ** 2 + self.sigma_data ** 2) * (sigma * self.sigma_data) ** -2
 
-        seq = torch.randn((batch, self.dim), device = device)
+    def noise_distribution(self, batch_size):
+        return (self.P_mean + self.P_std * torch.randn((batch_size,), device = self.device)).exp()
 
-        for times, times_next in tqdm(time_pairs, desc = 'sampling loop time step', leave = False):
+    def forward(self, seq, *, cond):
+        batch_size, dim, device = *seq.shape, self.device
 
-            # get times and noise levels
+        assert dim == self.dim, f'dimension of sequence being passed in must be {self.dim} but received {dim}'
 
-            gamma = self.gamma_schedule(times)
-            gamma_next = self.gamma_schedule(times_next)
-
-            padded_gamma, padded_gamma_next = map(partial(right_pad_dims_to, seq), (gamma, gamma_next))
-
-            alpha, sigma = gamma_to_alpha_sigma(padded_gamma)
-            alpha_next, sigma_next = gamma_to_alpha_sigma(padded_gamma_next)
-
-            # predict x0
-
-            model_output = self.model(seq, times = times, cond = cond)
-
-            # calculate x0 and noise
-
-            if self.objective == 'eps':
-                x_start = safe_div(seq - sigma * model_output, alpha)
-
-            elif self.objective == 'v':
-                x_start = alpha * seq - sigma * model_output
-
-            # clip x0
-
-            if self.clip_during_sampling:
-                x_start.clamp_(-1., 1.)
-
-            # get predicted noise
-
-            pred_noise = safe_div(seq - alpha * x_start, sigma)
-
-            # calculate x next
-
-            seq = x_start * alpha_next + pred_noise * sigma_next
-
-        return seq
-
-    @torch.no_grad()
-    def sample(self, *, cond, batch_size = 16):
-        sample_fn = self.ddpm_sample if not self.use_ddim else self.ddim_sample
-        return sample_fn(cond)
-
-    def forward(self, seq, *args, cond, **kwargs):
-
-        batch, device = seq.shape[0], seq.device
-
-        # sample random times
-
-        times = torch.rand((batch,), device = device)
-
-        # noise sample
+        sigmas = self.noise_distribution(batch_size)
+        padded_sigmas = rearrange(sigmas, 'b -> b 1')
 
         noise = torch.randn_like(seq)
 
-        gamma = self.gamma_schedule(times)
-        padded_gamma = right_pad_dims_to(seq, gamma)
-        alpha, sigma =  gamma_to_alpha_sigma(padded_gamma)
+        noised_seq = seq + padded_sigmas * noise  # alphas are 1. in the paper
 
-        noised_seq = alpha * seq + sigma * noise
+        denoised = self.preconditioned_network_forward(noised_seq, sigmas, cond = cond)
 
-        # predict and take gradient step
+        losses = F.mse_loss(denoised, seq, reduction = 'none')
+        losses = reduce(losses, 'b ... -> b', 'mean')
 
-        pred = self.model(noised_seq, times = times, cond = cond)
+        losses = losses * self.loss_weight(sigmas)
 
-        if self.objective == 'eps':
-            target = noise
-
-        elif self.objective == 'v':
-            target = alpha * noise - sigma * seq
-
-        loss = F.mse_loss(pred, target, reduction = 'none')
-        loss = reduce(loss, 'b ... -> b', 'mean')
-
-        # min snr loss weight
-
-        snr = (alpha * alpha) / (sigma * sigma)
-        maybe_clipped_snr = snr.clone()
-
-        if self.min_snr_loss_weight:
-            maybe_clipped_snr.clamp_(max = self.min_snr_gamma)
-
-        if self.objective == 'eps':
-            loss_weight = maybe_clipped_snr / snr
-
-        elif self.objective == 'v':
-            loss_weight = maybe_clipped_snr / (snr + 1)
-
-        return (loss * loss_weight).mean()
+        return losses.mean()
 
 # main model, a decoder with continuous wrapper + small denoising mlp
 
@@ -408,10 +363,7 @@ class AutoregressiveDiffusion(Module):
         decoder_kwargs: dict = dict(),
         mlp_kwargs: dict = dict(),
         diffusion_kwargs: dict = dict(
-            timesteps = 1000,
-            sampling_timesteps = 100,
-            use_ddim = False,
-            clip_during_sampling = True
+            clamp_during_sampling = True
         )
     ):
         super().__init__()
@@ -440,7 +392,7 @@ class AutoregressiveDiffusion(Module):
             **mlp_kwargs
         )
 
-        self.diffusion = GaussianDiffusion(
+        self.diffusion = ElucidatedDiffusion(
             dim_input,
             self.denoiser,
             **diffusion_kwargs
