@@ -6,9 +6,9 @@ Implementation of the architecture behind <a href="https://arxiv.org/abs/2406.11
 
 Official repository has been released <a href="https://github.com/LTH14/mar">here</a>
 
-<img src="./images/sample.flowers.59000.png" width="400px"></img>
+<img src="./images/results.96600.png" width="400px"></img>
 
-*oxford flowers at 59k steps*
+*oxford flowers at 96k steps*
 
 ## Install
 
