@@ -6,6 +6,7 @@ from pathlib import Path
 from accelerate import Accelerator
 from ema_pytorch import EMA
 
+import torch
 from torch import nn
 from torch.optim import Adam
 from torch.utils.data import DataLoader
@@ -81,7 +82,7 @@ class ImageDataset(Dataset):
 
 # trainer
 
-class Trainer(Module):
+class ImageTrainer(Module):
     def __init__(
         self,
         model,

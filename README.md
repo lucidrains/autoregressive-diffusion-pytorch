@@ -69,6 +69,38 @@ assert sampled.shape == images.shape
 
 ```
 
+An images trainer
+
+```python
+import torch
+
+from autoregressive_diffusion_pytorch import (
+    ImageDataset,
+    ImageAutoregressiveDiffusion,
+    ImageTrainer
+)
+
+dataset = ImageDataset(
+    '/path/to/your/images',
+    image_size = 128
+)
+
+model = ImageAutoregressiveDiffusion(
+    model = dict(
+        dim = 512
+    ),
+    image_size = 128,
+    patch_size = 16
+)
+
+trainer = ImageTrainer(
+    model = model,
+    dataset = dataset
+)
+
+trainer()
+```
+
 ## Citations
 
 ```bibtex
