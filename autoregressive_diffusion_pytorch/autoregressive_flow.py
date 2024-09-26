@@ -33,6 +33,9 @@ def default(v, d):
 def divisible_by(num, den):
     return (num % den) == 0
 
+def cast_tuple(t):
+    return (t,) if not isinstance(t, tuple) else t
+
 # tensor helpers
 
 def log(t, eps = 1e-20):
@@ -176,7 +179,7 @@ class AutoregressiveFlow(Module):
         self,
         dim,
         *,
-        max_seq_len,
+        max_seq_len: int | tuple[int, ...],
         depth = 8,
         dim_head = 64,
         heads = 8,
@@ -190,8 +193,11 @@ class AutoregressiveFlow(Module):
         super().__init__()
 
         self.start_token = nn.Parameter(torch.zeros(dim))
-        self.max_seq_len = max_seq_len
-        self.abs_pos_emb = nn.Embedding(max_seq_len, dim)
+
+        max_seq_len = cast_tuple(max_seq_len)
+        self.abs_pos_emb = nn.ParameterList([nn.Parameter(torch.zeros(seq_len, dim)) for seq_len in max_seq_len])
+
+        self.max_seq_len = math.prod(max_seq_len)
 
         dim_input = default(dim_input, dim)
         self.dim_input = dim_input
@@ -223,6 +229,21 @@ class AutoregressiveFlow(Module):
     def device(self):
         return next(self.transformer.parameters()).device
 
+    def add_abs_pos_emb(self, seq):
+        seq_len = seq.shape[1]
+
+        # prepare maybe axial positional embedding
+
+        pos_emb, *rest_pos_embs = self.abs_pos_emb
+
+        for rest_pos_emb in rest_pos_embs:
+            pos_emb = einx.add('i d, j d -> (i j) d', pos_emb, rest_pos_emb)
+
+        pos_emb = F.pad(pos_emb, (0, 0, 1, 0), value = 0.) # account for start token
+
+        seq = seq + pos_emb[:seq_len]
+        return seq
+
     @torch.no_grad()
     def sample(
         self,
@@ -245,7 +266,7 @@ class AutoregressiveFlow(Module):
             cond = self.proj_in(out)
 
             cond = torch.cat((start_tokens, cond), dim = 1)
-            cond = cond + self.abs_pos_emb(torch.arange(cond.shape[1], device = self.device))
+            cond = self.add_abs_pos_emb(cond)
 
             cond, cache = self.transformer(cond, cache = cache, return_hiddens = True)
 
@@ -281,7 +302,8 @@ class AutoregressiveFlow(Module):
         start_token = repeat(self.start_token, 'd -> b 1 d', b = b)
 
         seq = torch.cat((start_token, seq), dim = 1)
-        seq = seq + self.abs_pos_emb(torch.arange(seq_len, device = self.device))
+
+        seq = self.add_abs_pos_emb(seq)
 
         cond = self.transformer(seq)
 
@@ -313,7 +335,8 @@ class ImageAutoregressiveFlow(Module):
         super().__init__()
         assert divisible_by(image_size, patch_size)
 
-        num_patches = (image_size // patch_size) ** 2
+        patch_height_width = image_size // patch_size
+        num_patches = patch_height_width ** 2
         dim_in = channels * patch_size ** 2
 
         self.image_size = image_size
@@ -328,7 +351,7 @@ class ImageAutoregressiveFlow(Module):
         self.model = AutoregressiveFlow(
             **model,
             dim_input = dim_in,
-            max_seq_len = num_patches
+            max_seq_len = (patch_height_width, patch_height_width)
         )
 
         self.to_image = Rearrange('b (h w) (c p1 p2) -> b c (h p1) (w p2)', p1 = patch_size, p2 = patch_size, h = int(math.sqrt(num_patches)))
