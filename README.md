@@ -101,6 +101,42 @@ trainer = ImageTrainer(
 trainer()
 ```
 
+For an improvised version using flow matching, just import `ImageAutoregressiveFlow` and `AutoregressiveFlow` instead
+
+The rest is the same
+
+ex.
+
+```python
+import torch
+
+from autoregressive_diffusion_pytorch import (
+    ImageDataset,
+    ImageTrainer,
+    ImageAutoregressiveFlow,
+)
+
+dataset = ImageDataset(
+    '/path/to/your/images',
+    image_size = 128
+)
+
+model = ImageAutoregressiveFlow(
+    model = dict(
+        dim = 512
+    ),
+    image_size = 128,
+    patch_size = 16
+)
+
+trainer = ImageTrainer(
+    model = model,
+    dataset = dataset
+)
+
+trainer()
+```
+
 ## Citations
 
 ```bibtex
