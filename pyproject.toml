@@ -1,6 +1,6 @@
 [project]
 name = "autoregressive-diffusion-pytorch"
-version = "0.2.2"
+version = "0.2.3"
 description = "Autoregressive Diffusion - Pytorch"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
@@ -25,8 +25,10 @@ classifiers=[
 dependencies = [
     'einx>=0.3.0',
     'einops>=0.8.0',
+    'ema-pytorch',
     'x-transformers>=1.31.14',
     'torch>=2.0',
+    'torchdiffeq',
     'tqdm'
 ]
 
