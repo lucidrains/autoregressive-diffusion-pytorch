@@ -260,7 +260,8 @@ class AutoregressiveFlow(Module):
 
     def forward(
         self,
-        seq
+        seq,
+        noised_seq = None
     ):
         b, seq_len, dim = seq.shape
 
@@ -270,6 +271,9 @@ class AutoregressiveFlow(Module):
         # break into seq and the continuous targets to be predicted
 
         seq, target = seq[:, :-1], seq
+
+        if exists(noised_seq):
+            seq = noised_seq[:, :-1]
 
         # append start tokens
 
@@ -303,6 +307,7 @@ class ImageAutoregressiveFlow(Module):
         image_size,
         patch_size,
         channels = 3,
+        train_max_noise = 0.,
         model: dict = dict(),
     ):
         super().__init__()
@@ -313,6 +318,10 @@ class ImageAutoregressiveFlow(Module):
 
         self.image_size = image_size
         self.patch_size = patch_size
+
+        assert 0. <= train_max_noise < 1.
+
+        self.train_max_noise = train_max_noise
 
         self.to_tokens = Rearrange('b c (h p1) (w p2) -> b (h w) (c p1 p2)', p1 = patch_size, p2 = patch_size)
 
@@ -330,6 +339,20 @@ class ImageAutoregressiveFlow(Module):
         return unnormalize_to_zero_to_one(images)
 
     def forward(self, images):
+        train_under_noise, device = self.train_max_noise > 0., images.device
+
         images = normalize_to_neg_one_to_one(images)
         tokens = self.to_tokens(images)
-        return self.model(tokens)
+
+        if not train_under_noise:
+            return self.model(tokens)
+
+        # allow for the network to predict from slightly noised images of the past
+
+        times = torch.rand(images.shape[0], device = device) * self.train_max_noise
+        noise = torch.randn_like(images)
+        padded_times = right_pad_dims_to(images, times)
+        noised_images = images * (1. - padded_times) + noise * padded_times
+        noised_tokens = self.to_tokens(noised_images)
+
+        return self.model(tokens, noised_tokens)
