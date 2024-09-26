@@ -6,6 +6,8 @@ Implementation of the architecture behind <a href="https://arxiv.org/abs/2406.11
 
 Official repository has been released <a href="https://github.com/LTH14/mar">here</a>
 
+<a href="https://github.com/lucidrains/transfusion-pytorch">Alternative route</a>
+
 <img src="./images/results.96600.png" width="400px"></img>
 
 *oxford flowers at 96k steps*
