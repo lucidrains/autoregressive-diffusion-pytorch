@@ -61,41 +61,7 @@ def pack_one(t, pattern):
 
     return packed, unpack_one
 
-# sinusoidal embedding
-
-class AdaptiveLayerNorm(Module):
-    def __init__(
-        self,
-        dim,
-        dim_condition = None
-    ):
-        super().__init__()
-        dim_condition = default(dim_condition, dim)
-
-        self.ln = nn.LayerNorm(dim, elementwise_affine = False)
-        self.to_gamma = nn.Linear(dim_condition, dim, bias = False)
-        nn.init.zeros_(self.to_gamma.weight)
-
-    def forward(self, x, *, condition):
-        normed = self.ln(x)
-        gamma = self.to_gamma(condition)
-        return normed * (gamma + 1.)
-
-class LearnedSinusoidalPosEmb(Module):
-    def __init__(self, dim):
-        super().__init__()
-        assert divisible_by(dim, 2)
-        half_dim = dim // 2
-        self.weights = nn.Parameter(torch.randn(half_dim))
-
-    def forward(self, x):
-        x = rearrange(x, 'b -> b 1')
-        freqs = x * rearrange(self.weights, 'd -> 1 d') * 2 * pi
-        fouriered = torch.cat((freqs.sin(), freqs.cos()), dim = -1)
-        fouriered = torch.cat((x, fouriered), dim = -1)
-        return fouriered
-
-# gaussian diffusion
+# rectified flow
 
 class Flow(Module):
     def __init__(
@@ -184,7 +150,7 @@ class AutoregressiveFlow(Module):
         dim_head = 64,
         heads = 8,
         mlp_depth = 3,
-        mlp_width = None,
+        mlp_width = 1024,
         dim_input = None,
         decoder_kwargs: dict = dict(),
         mlp_kwargs: dict = dict(),
@@ -211,11 +177,13 @@ class AutoregressiveFlow(Module):
             **decoder_kwargs
         )
 
+        self.to_cond_emb = nn.Linear(dim, dim, bias = False)
+
         self.denoiser = MLP(
             dim_cond = dim,
             dim_input = dim_input,
             depth = mlp_depth,
-            width = default(mlp_width, dim),
+            width = mlp_width,
             **mlp_kwargs
         )
 
@@ -229,9 +197,7 @@ class AutoregressiveFlow(Module):
     def device(self):
         return next(self.transformer.parameters()).device
 
-    def add_abs_pos_emb(self, seq):
-        seq_len = seq.shape[1]
-
+    def axial_pos_emb(self):
         # prepare maybe axial positional embedding
 
         pos_emb, *rest_pos_embs = self.abs_pos_emb
@@ -239,10 +205,7 @@ class AutoregressiveFlow(Module):
         for rest_pos_emb in rest_pos_embs:
             pos_emb = einx.add('i d, j d -> (i j) d', pos_emb, rest_pos_emb)
 
-        pos_emb = F.pad(pos_emb, (0, 0, 1, 0), value = 0.) # account for start token
-
-        seq = seq + pos_emb[:seq_len]
-        return seq
+        return F.pad(pos_emb, (0, 0, 1, 0), value = 0.)
 
     @torch.no_grad()
     def sample(
@@ -266,11 +229,17 @@ class AutoregressiveFlow(Module):
             cond = self.proj_in(out)
 
             cond = torch.cat((start_tokens, cond), dim = 1)
-            cond = self.add_abs_pos_emb(cond)
+
+            seq_len = cond.shape[-2]
+            axial_pos_emb = self.axial_pos_emb()
+            cond += axial_pos_emb[:seq_len]
 
             cond, cache = self.transformer(cond, cache = cache, return_hiddens = True)
 
             last_cond = cond[:, -1]
+
+            last_cond += axial_pos_emb[seq_len]
+            last_cond = self.to_cond_emb(last_cond)
 
             denoised_pred = self.flow.sample(cond = last_cond)
 
@@ -303,9 +272,13 @@ class AutoregressiveFlow(Module):
 
         seq = torch.cat((start_token, seq), dim = 1)
 
-        seq = self.add_abs_pos_emb(seq)
+        axial_pos_emb = self.axial_pos_emb()
+        seq = seq + axial_pos_emb[:seq_len]
 
         cond = self.transformer(seq)
+
+        cond = cond + axial_pos_emb[1:(seq_len + 1)]
+        cond = self.to_cond_emb(cond)
 
         # pack batch and sequence dimensions, so to train each token with different noise levels
 
