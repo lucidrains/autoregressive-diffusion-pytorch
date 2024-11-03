@@ -1,6 +1,6 @@
 [project]
 name = "autoregressive-diffusion-pytorch"
-version = "0.2.7"
+version = "0.2.8"
 description = "Autoregressive Diffusion - Pytorch"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
@@ -47,4 +47,4 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["autoregressive-diffusion-pytorch"]
+packages = ["autoregressive_diffusion_pytorch"]
