@@ -23,6 +23,7 @@ classifiers=[
   ]
 
 dependencies = [
+    'accelerate<=1.6.0',
     'einx>=0.3.0',
     'einops>=0.8.0',
     'ema-pytorch',

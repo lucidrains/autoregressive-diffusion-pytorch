@@ -71,7 +71,9 @@ class Flow(Module):
         *,
         atol = 1e-5,
         rtol = 1e-5,
-        method = 'midpoint'
+        method = 'midpoint',
+        model_output_clean = True,
+        eps = 5e-2
     ):
         super().__init__()
         self.net = net
@@ -82,6 +84,9 @@ class Flow(Module):
             rtol = rtol,
             method = method
         )
+
+        self.model_output_clean = model_output_clean
+        self.eps = eps
 
     @property
     def device(self):
@@ -110,7 +115,14 @@ class Flow(Module):
 
         def ode_fn(t, x):
             t = repeat(t, '-> b', b = batch)
-            flow = self.net(x, times = t, cond = cond)
+            out = self.net(x, times = t, cond = cond)
+
+            if not self.model_output_clean:
+                flow = out
+            else:
+                t = right_pad_dims_to(x, t)
+                flow = (out - x) / (1. - t).clamp_min(self.eps)
+
             return flow
 
         trajectory = odeint(ode_fn, noise, times, **self.odeint_kwargs)
@@ -134,7 +146,12 @@ class Flow(Module):
 
         noised = (1.- padded_times) * noise + padded_times * seq
 
-        pred_flow = self.net(noised, times = times, cond = cond)
+        model_out = self.net(noised, times = times, cond = cond)
+
+        if not self.model_output_clean:
+            pred_flow = model_out
+        else:
+            pred_flow = (model_out - noised) / (1. - padded_times).clamp_min(self.eps)
 
         return F.mse_loss(pred_flow, flow)
 
@@ -154,7 +171,8 @@ class AutoregressiveFlow(Module):
         dim_input = None,
         decoder_kwargs: dict = dict(),
         mlp_kwargs: dict = dict(),
-        flow_kwargs: dict = dict()
+        flow_kwargs: dict = dict(),
+        model_output_clean = True # output in x-space
     ):
         super().__init__()
 
@@ -190,6 +208,7 @@ class AutoregressiveFlow(Module):
         self.flow = Flow(
             dim_input,
             self.denoiser,
+            model_output_clean = model_output_clean,
             **flow_kwargs
         )
 
@@ -303,6 +322,7 @@ class ImageAutoregressiveFlow(Module):
         patch_size,
         channels = 3,
         train_max_noise = 0.,
+        model_output_clean = True, # for outputting in x-space
         model: dict = dict(),
     ):
         super().__init__()
@@ -324,7 +344,8 @@ class ImageAutoregressiveFlow(Module):
         self.model = AutoregressiveFlow(
             **model,
             dim_input = dim_in,
-            max_seq_len = (patch_height_width, patch_height_width)
+            max_seq_len = (patch_height_width, patch_height_width),
+            model_output_clean = model_output_clean
         )
 
         self.to_image = Rearrange('b (h w) (c p1 p2) -> b c (h p1) (w p2)', p1 = patch_size, p2 = patch_size, h = int(math.sqrt(num_patches)))
