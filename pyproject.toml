@@ -1,6 +1,6 @@
 [project]
 name = "autoregressive-diffusion-pytorch"
-version = "0.3.0"
+version = "0.4.0"
 description = "Autoregressive Diffusion - Pytorch"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
@@ -49,3 +49,11 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["autoregressive_diffusion_pytorch"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "autoregressive_diffusion_pytorch",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]

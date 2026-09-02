@@ -1,6 +1,8 @@
-from typing import List
+from __future__ import annotations
 
 import math
+import shutil
+from functools import partial
 from pathlib import Path
 
 from accelerate import Accelerator
@@ -41,7 +43,7 @@ class ImageDataset(Dataset):
         self,
         folder: str | Path,
         image_size: int,
-        exts: List[str] = ['jpg', 'jpeg', 'png', 'tiff'],
+        exts: list[str] = ['jpg', 'jpeg', 'png', 'tiff'],
         augment_horizontal_flip = False,
         convert_image_to = None
     ):
@@ -98,7 +100,8 @@ class ImageTrainer(Module):
         num_samples: int = 16,
         adam_kwargs: dict = dict(),
         accelerate_kwargs: dict = dict(),
-        ema_kwargs: dict = dict()
+        ema_kwargs: dict = dict(),
+        clear_folders: bool = False
     ):
         super().__init__()
         self.accelerator = Accelerator(**accelerate_kwargs)
@@ -124,6 +127,10 @@ class ImageTrainer(Module):
         self.checkpoints_folder = Path(checkpoints_folder)
         self.results_folder = Path(results_folder)
 
+        if clear_folders:
+            shutil.rmtree(self.checkpoints_folder, ignore_errors = True)
+            shutil.rmtree(self.results_folder, ignore_errors = True)
+
         self.checkpoints_folder.mkdir(exist_ok = True, parents = True)
         self.results_folder.mkdir(exist_ok = True, parents = True)
 
@@ -148,7 +155,7 @@ class ImageTrainer(Module):
         save_package = dict(
             model = self.accelerator.unwrap_model(self.model).state_dict(),
             ema_model = self.ema_model.state_dict(),
-            optimizer = self.accelerator.unwrap_model(self.optimizer).state_dict(),
+            optimizer = self.optimizer.state_dict(),
         )
 
         torch.save(save_package, str(self.checkpoints_folder / path))

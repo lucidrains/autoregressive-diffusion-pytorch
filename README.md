@@ -128,7 +128,8 @@ model = ImageAutoregressiveFlow(
         dim = 512
     ),
     image_size = 128,
-    patch_size = 16
+    patch_size = 16,
+    xm_candidates = 4  # explorative modeling - train against best of k candidates per timestep
 )
 
 trainer = ImageTrainer(
@@ -198,12 +199,24 @@ trainer()
 
 ```bibtex
 @misc{li2025basicsletdenoisinggenerative,
-    title   = {Back to Basics: Let Denoising Generative Models Denoise}, 
+    title   = {Back to Basics: Let Denoising Generative Models Denoise},
     author  = {Tianhong Li and Kaiming He},
     year    = {2025},
     eprint  = {2511.13720},
     archivePrefix = {arXiv},
     primaryClass = {cs.CV},
-    url     = {https://arxiv.org/abs/2511.13720}, 
+    url     = {https://arxiv.org/abs/2511.13720},
+}
+```
+
+```bibtex
+@misc{gladstone2026explorativemodelingunlockingpretraining,
+    title   = {Explorative Modeling: Unlocking a Third Pretraining Axis and End-to-End Generation},
+    author  = {Alexi Gladstone and Heng Ji and Yilun Du},
+    year    = {2026},
+    eprint  = {2607.27372},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG},
+    url     = {https://arxiv.org/abs/2607.27372},
 }
 ```

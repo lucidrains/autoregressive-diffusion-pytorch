@@ -21,6 +21,7 @@ from tqdm import tqdm
 from x_transformers import Decoder
 
 from autoregressive_diffusion_pytorch.autoregressive_diffusion import MLP
+from autoregressive_diffusion_pytorch.xm import XMWrapper
 
 # helpers
 
@@ -131,14 +132,17 @@ class Flow(Module):
 
         return sampled
 
+    def noise_distribution(self, batch_size):
+        return torch.rand(batch_size, device = self.device)
+
     # training
 
-    def forward(self, seq, *, cond):
-        batch_size, dim, device = *seq.shape, self.device
+    def forward(self, seq, *, cond, loss_reduction = 'mean', times = None):
+        batch_size, dim = seq.shape
 
         assert dim == self.dim, f'dimension of sequence being passed in must be {self.dim} but received {dim}'
 
-        times = torch.rand(batch_size, device = device)
+        times = default(times, self.noise_distribution(batch_size))
         noise = torch.randn_like(seq)
         padded_times = right_pad_dims_to(seq, times)
 
@@ -153,11 +157,19 @@ class Flow(Module):
         else:
             pred_flow = (model_out - noised) / (1. - padded_times).clamp_min(self.eps)
 
-        return F.mse_loss(pred_flow, flow)
+        loss = F.mse_loss(pred_flow, flow, reduction = 'none')
+        loss = reduce(loss, 'b ... -> b', 'mean')
+
+        if loss_reduction == 'none':
+            return loss
+
+        return loss.mean()
 
 # main model, a decoder with continuous wrapper + small denoising mlp
 
 class AutoregressiveFlow(Module):
+    uses_sigmas = False
+
     def __init__(
         self,
         dim,
@@ -267,10 +279,15 @@ class AutoregressiveFlow(Module):
 
         return out
 
+    def noise_distribution(self, batch_size):
+        return self.flow.noise_distribution(batch_size)
+
     def forward(
         self,
         seq,
-        noised_seq = None
+        noised_seq = None,
+        loss_reduction = 'mean',
+        times = None
     ):
         b, seq_len, dim = seq.shape
 
@@ -304,7 +321,17 @@ class AutoregressiveFlow(Module):
         target, _ = pack_one(target, '* d')
         cond, _ = pack_one(cond, '* d')
 
-        return self.flow(target, cond = cond)
+        # if times are provided (e.g. from xm wrapper), repeat per token to match the packed rows
+
+        if exists(times):
+            times = repeat(times, 'b -> (b n)', n = seq_len)
+
+        loss = self.flow(target, cond = cond, loss_reduction = loss_reduction, times = times)
+
+        if loss_reduction == 'none':
+            loss = rearrange(loss, '(b n) ... -> b (n ...)', b = b)
+
+        return loss
 
 # image wrapper
 
@@ -323,6 +350,8 @@ class ImageAutoregressiveFlow(Module):
         channels = 3,
         train_max_noise = 0.,
         model_output_clean = True, # for outputting in x-space
+        xm_candidates = 1,
+        max_batch_size = None,
         model: dict = dict(),
     ):
         super().__init__()
@@ -348,6 +377,9 @@ class ImageAutoregressiveFlow(Module):
             model_output_clean = model_output_clean
         )
 
+        if xm_candidates > 1:
+            self.model = XMWrapper(self.model, xm_candidates = xm_candidates, max_batch_size = max_batch_size)
+
         self.to_image = Rearrange('b (h w) (c p1 p2) -> b c (h p1) (w p2)', p1 = patch_size, p2 = patch_size, h = int(math.sqrt(num_patches)))
 
     def sample(self, batch_size = 1):
@@ -355,14 +387,14 @@ class ImageAutoregressiveFlow(Module):
         images = self.to_image(tokens)
         return unnormalize_to_zero_to_one(images)
 
-    def forward(self, images):
+    def forward(self, images, loss_reduction = 'mean'):
         train_under_noise, device = self.train_max_noise > 0., images.device
 
         images = normalize_to_neg_one_to_one(images)
         tokens = self.to_tokens(images)
 
         if not train_under_noise:
-            return self.model(tokens)
+            return self.model(tokens, loss_reduction = loss_reduction)
 
         # allow for the network to predict from slightly noised images of the past
 
@@ -372,4 +404,4 @@ class ImageAutoregressiveFlow(Module):
         noised_images = images * (1. - padded_times) + noise * padded_times
         noised_tokens = self.to_tokens(noised_images)
 
-        return self.model(tokens, noised_tokens)
+        return self.model(tokens, noised_tokens, loss_reduction = loss_reduction)

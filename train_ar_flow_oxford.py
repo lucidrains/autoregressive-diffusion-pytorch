@@ -1,5 +1,7 @@
 # hf datasets for easy oxford flowers training
 
+import fire
+
 import torchvision.transforms as T
 from torch.utils.data import Dataset
 from datasets import load_dataset
@@ -24,33 +26,41 @@ class OxfordFlowersDataset(Dataset):
         tensor = self.transform(pil)
         return tensor / 255.
 
-flowers_dataset = OxfordFlowersDataset(
-    image_size = 64
-)
+def train(clear: bool = False):
+    flowers_dataset = OxfordFlowersDataset(
+        image_size = 64
+    )
 
-from autoregressive_diffusion_pytorch import ImageAutoregressiveFlow, ImageTrainer
+    from autoregressive_diffusion_pytorch import ImageAutoregressiveFlow, ImageTrainer
 
-model = ImageAutoregressiveFlow(
-    model = dict(
-        dim = 1024,
-        depth = 8,
-        heads = 8,
-        mlp_depth = 4,
-        decoder_kwargs = dict(
-            rotary_pos_emb = True
-        )
-    ),
-    image_size = 64,
-    patch_size = 8,
-    model_output_clean = True
-)
+    model = ImageAutoregressiveFlow(
+        model = dict(
+            dim = 1024,
+            depth = 8,
+            heads = 8,
+            mlp_depth = 4,
+            decoder_kwargs = dict(
+                rotary_pos_emb = True
+            )
+        ),
+        image_size = 64,
+        patch_size = 8,
+        model_output_clean = True,
+        xm_candidates = 2
+    )
 
-trainer = ImageTrainer(
-    model,
-    dataset = flowers_dataset,
-    num_train_steps = 1_000_000,
-    learning_rate = 7e-5,
-    batch_size = 32
-)
+    trainer = ImageTrainer(
+        model,
+        dataset = flowers_dataset,
+        num_train_steps = 1_000_000,
+        learning_rate = 7e-5,
+        batch_size = 16,
+        save_results_every = 250,
+        checkpoint_every = 2500,
+        clear_folders = clear
+    )
 
-trainer()
+    trainer()
+
+if __name__ == '__main__':
+    fire.Fire(train)

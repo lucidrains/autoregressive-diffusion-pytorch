@@ -19,6 +19,8 @@ from tqdm import tqdm
 
 from x_transformers import Decoder
 
+from autoregressive_diffusion_pytorch.xm import XMWrapper
+
 # helpers
 
 def exists(v):
@@ -325,12 +327,13 @@ class ElucidatedDiffusion(Module):
     def noise_distribution(self, batch_size):
         return (self.P_mean + self.P_std * torch.randn((batch_size,), device = self.device)).exp()
 
-    def forward(self, seq, *, cond):
+    def forward(self, seq, *, cond, loss_reduction = 'mean', sigmas = None):
         batch_size, dim, device = *seq.shape, self.device
 
         assert dim == self.dim, f'dimension of sequence being passed in must be {self.dim} but received {dim}'
 
-        sigmas = self.noise_distribution(batch_size)
+        sigmas = default(sigmas, self.noise_distribution(batch_size))
+
         padded_sigmas = right_pad_dims_to(seq, sigmas)
 
         noise = torch.randn_like(seq)
@@ -344,11 +347,16 @@ class ElucidatedDiffusion(Module):
 
         losses = losses * self.loss_weight(sigmas)
 
+        if loss_reduction == 'none':
+            return losses
+
         return losses.mean()
 
 # main model, a decoder with continuous wrapper + small denoising mlp
 
 class AutoregressiveDiffusion(Module):
+    uses_sigmas = True
+
     def __init__(
         self,
         dim,
@@ -437,9 +445,14 @@ class AutoregressiveDiffusion(Module):
 
         return out
 
+    def noise_distribution(self, batch_size):
+        return self.diffusion.noise_distribution(batch_size)
+
     def forward(
         self,
-        seq
+        seq,
+        loss_reduction = 'mean',
+        sigmas = None
     ):
         b, seq_len, dim = seq.shape
 
@@ -465,7 +478,15 @@ class AutoregressiveDiffusion(Module):
         target, _ = pack_one(target, '* d')
         cond, _ = pack_one(cond, '* d')
 
-        diffusion_loss = self.diffusion(target, cond = cond)
+        # if sigmas are provided (e.g. from xm wrapper), repeat per token to match the packed rows
+
+        if exists(sigmas):
+            sigmas = repeat(sigmas, 'b -> (b n)', n = seq_len)
+
+        diffusion_loss = self.diffusion(target, cond = cond, loss_reduction = loss_reduction, sigmas = sigmas)
+
+        if loss_reduction == 'none':
+            diffusion_loss = rearrange(diffusion_loss, '(b n) ... -> b (n ...)', b = b)
 
         return diffusion_loss
 
@@ -484,6 +505,8 @@ class ImageAutoregressiveDiffusion(Module):
         image_size,
         patch_size,
         channels = 3,
+        xm_candidates = 1,
+        max_batch_size = None,
         model: dict = dict(),
     ):
         super().__init__()
@@ -503,6 +526,9 @@ class ImageAutoregressiveDiffusion(Module):
             max_seq_len = num_patches
         )
 
+        if xm_candidates > 1:
+            self.model = XMWrapper(self.model, xm_candidates = xm_candidates, max_batch_size = max_batch_size)
+
         self.to_image = Rearrange('b (h w) (c p1 p2) -> b c (h p1) (w p2)', p1 = patch_size, p2 = patch_size, h = int(math.sqrt(num_patches)))
 
     def sample(self, batch_size = 1):
@@ -510,7 +536,7 @@ class ImageAutoregressiveDiffusion(Module):
         images = self.to_image(tokens)
         return unnormalize_to_zero_to_one(images)
 
-    def forward(self, images):
+    def forward(self, images, loss_reduction = 'mean'):
         images = normalize_to_neg_one_to_one(images)
         tokens = self.to_tokens(images)
-        return self.model(tokens)
+        return self.model(tokens, loss_reduction = loss_reduction)
