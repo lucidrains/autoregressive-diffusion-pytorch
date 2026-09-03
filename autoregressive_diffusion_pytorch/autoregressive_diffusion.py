@@ -257,6 +257,17 @@ class ElucidatedDiffusion(Module):
         num_sample_steps = default(num_sample_steps, self.num_sample_steps)
 
         N = num_sample_steps
+
+        if N < 1:
+            raise ValueError('num_sample_steps must be greater than zero')
+
+        # The Karras interpolation uses N - 1 intervals.  A one-step
+        # sampler still has a well-defined schedule: start at sigma_max and
+        # take the final denoising step directly to zero.
+        if N == 1:
+            sigmas = torch.full((1,), self.sigma_max, device = self.device, dtype = torch.float32)
+            return F.pad(sigmas, (0, 1), value = 0.)
+
         inv_rho = 1 / self.rho
 
         steps = torch.arange(num_sample_steps, device = self.device, dtype = torch.float32)
